@@ -2,7 +2,9 @@ const axios = require("axios");
 const db = require("../models");
 const { sendError500 } = require("../utils/request.utils");
 
-// multiplicadores de daño según tipo (simplificado)
+// Estado temporal de batallas activas (clave: user.id)
+const activeBattles = {};
+
 const typeAdvantages = {
     fire: ["grass", "bug", "ice"],
     water: ["fire", "rock", "ground"],
@@ -24,7 +26,7 @@ function calcularMultiplicador(atacante, defensor) {
     return 1;
 }
 
-exports.battlePokemon = async (req, res) => {
+exports.iniciarBatalla = async (req, res) => {
     try {
         const user = res.locals.user;
         const { pokemon_id } = req.body;
@@ -33,7 +35,6 @@ exports.battlePokemon = async (req, res) => {
             return res.status(400).send({ message: "Debes enviar el ID del Pokémon del jugador" });
         }
 
-        // Obtener el Pokémon del jugador
         const pokemonJugador = await db.pokemon.findOne({
             where: { id: pokemon_id, usuario_id: user.id },
         });
@@ -42,8 +43,7 @@ exports.battlePokemon = async (req, res) => {
             return res.status(404).send({ message: "Pokémon no encontrado o no pertenece al usuario" });
         }
 
-        // Generar un Pokémon salvaje aleatorio
-        const randomId = Math.floor(Math.random() * 100) + 1; // entre 1 y 100
+        const randomId = Math.floor(Math.random() * 100) + 1;
         const response = await axios.get(`https://pokeapi.co/api/v2/pokemon/${randomId}`);
         const wildData = response.data;
 
@@ -57,7 +57,6 @@ exports.battlePokemon = async (req, res) => {
             imagen: wildData.sprites.front_default || "",
         };
 
-        // Preparar datos del jugador
         const jugador = {
             nombre: pokemonJugador.nombre,
             tipo: pokemonJugador.tipo.split(",")[0],
@@ -68,64 +67,105 @@ exports.battlePokemon = async (req, res) => {
             curas: 2,
         };
 
-        // Simulación de batalla
-        let turno = 1;
-        const log = [];
+        // Guardar la batalla activa
+        activeBattles[user.id] = {
+            turno: 1,
+            jugador,
+            pokemonSalvaje,
+            log: ["¡Comienza la batalla contra un " + pokemonSalvaje.nombre + "!"],
+        };
 
-        while (jugador.hp > 0 && pokemonSalvaje.hp > 0) {
-            log.push(`--- Turno ${turno} ---`);
+        res.send({
+            message: "Batalla iniciada",
+            estado: activeBattles[user.id],
+        });
 
-            // Daño mutuo
-            const multJugador = calcularMultiplicador(jugador.tipo, pokemonSalvaje.tipo.split(",")[0]);
-            const multSalvaje = calcularMultiplicador(pokemonSalvaje.tipo.split(",")[0], jugador.tipo);
+    } catch (error) {
+        sendError500(res, error);
+    }
+};
 
-            const dañoJugador = Math.max(5, (jugador.ataque - pokemonSalvaje.defensa / 2) * multJugador);
-            const dañoSalvaje = Math.max(5, (pokemonSalvaje.ataque - jugador.defensa / 2) * multSalvaje);
+exports.realizarAccion = async (req, res) => {
+    try {
+        const user = res.locals.user;
+        const { accion } = req.body; // atacar, defender, curar, huir
 
-            // Aplicar daño
-            pokemonSalvaje.hp -= dañoJugador;
-            jugador.hp -= dañoSalvaje;
-
-            log.push(`${jugador.nombre} inflige ${dañoJugador.toFixed(1)} de daño.`);
-            log.push(`${pokemonSalvaje.nombre} inflige ${dañoSalvaje.toFixed(1)} de daño.`);
-
-            // Curaciones automáticas (si la vida baja de 30%)
-            if (jugador.hp < (pokemonJugador.hp * 5) * 0.3 && jugador.curas > 0) {
-                const cura = (pokemonJugador.hp * 5) * 0.5;
-                jugador.hp += cura;
-                jugador.curas--;
-                log.push(`${jugador.nombre} usa una cura (+${cura} HP). Restantes: ${jugador.curas}`);
-            }
-
-            turno++;
+        const batalla = activeBattles[user.id];
+        if (!batalla) {
+            return res.status(400).send({ message: "No hay una batalla activa" });
         }
 
-        let resultado = "";
+        const { jugador, pokemonSalvaje, log } = batalla;
+        log.push(`--- Turno ${batalla.turno} ---`);
+
+        if (accion === "huir") {
+            delete activeBattles[user.id];
+            return res.send({ message: "Has huido de la batalla.", log });
+        }
+
+        if (accion === "curar") {
+            if (jugador.curas > 0) {
+                const cura = jugador.hp * 0.3;
+                jugador.hp += cura;
+                jugador.curas--;
+                log.push(`${jugador.nombre} se cura (+${cura.toFixed(1)} HP). Restantes: ${jugador.curas}`);
+            } else {
+                log.push(`${jugador.nombre} no tiene curas disponibles.`);
+            }
+        }
+
+        // Daño del jugador (solo si ataca)
+        if (accion === "atacar") {
+            const multJugador = calcularMultiplicador(jugador.tipo, pokemonSalvaje.tipo.split(",")[0]);
+            const dañoJugador = Math.max(5, (jugador.ataque - pokemonSalvaje.defensa / 2) * multJugador);
+            pokemonSalvaje.hp -= dañoJugador;
+            log.push(`${jugador.nombre} ataca e inflige ${dañoJugador.toFixed(1)} de daño.`);
+        }
+
+        // Defensa: reduce el daño del enemigo
+        let defensaExtra = 1;
+        if (accion === "defender") {
+            defensaExtra = 0.5;
+            log.push(`${jugador.nombre} se prepara para defenderse.`);
+        }
+
+        // Turno del enemigo (si sigue vivo)
+        if (pokemonSalvaje.hp > 0) {
+            const multSalvaje = calcularMultiplicador(pokemonSalvaje.tipo.split(",")[0], jugador.tipo);
+            const dañoSalvaje = Math.max(5, (pokemonSalvaje.ataque - jugador.defensa / 2) * multSalvaje * defensaExtra);
+            jugador.hp -= dañoSalvaje;
+            log.push(`${pokemonSalvaje.nombre} contraataca e inflige ${dañoSalvaje.toFixed(1)} de daño.`);
+        }
+
+        // Revisión de resultados
+        let resultado = null;
+
         if (jugador.hp <= 0 && pokemonSalvaje.hp <= 0) {
             resultado = "Empate: ambos Pokémon quedaron fuera de combate.";
-        } else if (jugador.hp > 0) {
+            delete activeBattles[user.id];
+        } else if (pokemonSalvaje.hp <= 0) {
             resultado = "¡Ganaste! Has capturado al Pokémon salvaje.";
-
-            // Guardar el Pokémon capturado
             await db.pokemon.create({
                 nombre: pokemonSalvaje.nombre,
                 tipo: pokemonSalvaje.tipo,
-                hp: wildData.stats.find(s => s.stat.name === "hp")?.base_stat || 0,
-                ataque: wildData.stats.find(s => s.stat.name === "attack")?.base_stat || 0,
-                defensa: wildData.stats.find(s => s.stat.name === "defense")?.base_stat || 0,
-                velocidad: wildData.stats.find(s => s.stat.name === "speed")?.base_stat || 0,
+                hp: pokemonSalvaje.hp / 5,
+                ataque: pokemonSalvaje.ataque,
+                defensa: pokemonSalvaje.defensa,
+                velocidad: pokemonSalvaje.velocidad,
                 imagen: pokemonSalvaje.imagen,
                 usuario_id: user.id,
             });
-        } else {
+            delete activeBattles[user.id];
+        } else if (jugador.hp <= 0) {
             resultado = "Perdiste. El Pokémon salvaje escapó.";
+            delete activeBattles[user.id];
         }
+
+        batalla.turno++;
 
         res.send({
             resultado,
-            pokemonJugador: jugador,
-            pokemonSalvaje,
-            log,
+            estado: batalla,
         });
 
     } catch (error) {

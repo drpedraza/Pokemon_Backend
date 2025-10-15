@@ -2,9 +2,10 @@ const { checkUserMiddleware } = require("../middlewares/check-user.middleware.js
 
 module.exports = app => {
     const controller = require("../controllers/batalla.controller.js");
-    let router = require("express").Router();
+    const router = require("express").Router();
 
-    router.post("/batalla", checkUserMiddleware, controller.battlePokemon);
+    router.post("/batalla/iniciar", checkUserMiddleware, controller.iniciarBatalla);
+    router.post("/batalla/accion", checkUserMiddleware, controller.realizarAccion);
 
     app.use("/api/pokemon", router);
 };
