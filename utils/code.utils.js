@@ -36,26 +36,3 @@ exports.generarCodigoBilletera = () => {
 
     
 };
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

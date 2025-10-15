@@ -5,7 +5,6 @@ const { sendError500 } = require("../utils/request.utils");
 // Capturar un Pokémon aleatorio
 exports.capturarPokemon = async (req, res) => {
     try {
-        // 1. Generar un número aleatorio entre 1 y 1302
         const randomId = Math.floor(Math.random() * 20) + 1;
 
         // 2. Llamar a la API de PokeAPI
