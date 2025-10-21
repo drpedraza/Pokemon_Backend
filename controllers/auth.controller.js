@@ -75,7 +75,7 @@ exports.generateUserToken = async (req, res) => {
             }
         });
     } catch (error) {
-        sendError500(res, error);
+        console.error("Error en generateUserToken:", error);
     }
 };
 

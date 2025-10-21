@@ -55,6 +55,7 @@ exports.iniciarBatalla = async (req, res) => {
             defensa: wildData.stats.find(s => s.stat.name === "defense")?.base_stat || 0,
             velocidad: wildData.stats.find(s => s.stat.name === "speed")?.base_stat || 0,
             imagen: wildData.sprites.front_default || "",
+            base_hp: wildData.stats.find(s => s.stat.name === "hp")?.base_stat || 50, // guardamos el hp base real
         };
 
         const jugador = {
@@ -122,6 +123,28 @@ exports.realizarAccion = async (req, res) => {
             log.push(`${jugador.nombre} ataca e inflige ${dañoJugador.toFixed(1)} de daño.`);
         }
 
+        // ⚠️ Si el salvaje murió, termina la batalla aquí mismo
+        if (pokemonSalvaje.hp <= 0) {
+            const resultado = "¡Ganaste! Has capturado al Pokémon salvaje.";
+
+            // HP final: el base real (o mínimo 1)
+            const hpFinal = Math.max(1, Math.round(pokemonSalvaje.base_hp));
+
+            await db.pokemon.create({
+                nombre: pokemonSalvaje.nombre,
+                tipo: pokemonSalvaje.tipo,
+                hp: hpFinal,
+                ataque: pokemonSalvaje.ataque,
+                defensa: pokemonSalvaje.defensa,
+                velocidad: pokemonSalvaje.velocidad,
+                imagen: pokemonSalvaje.imagen,
+                usuario_id: user.id,
+            });
+
+            delete activeBattles[user.id];
+            return res.send({ resultado, estado: batalla });
+        }
+
         // Defensa: reduce el daño del enemigo
         let defensaExtra = 1;
         if (accion === "defender") {
@@ -129,7 +152,7 @@ exports.realizarAccion = async (req, res) => {
             log.push(`${jugador.nombre} se prepara para defenderse.`);
         }
 
-        // Turno del enemigo (si sigue vivo)
+        // Turno del enemigo (solo si sigue vivo)
         if (pokemonSalvaje.hp > 0) {
             const multSalvaje = calcularMultiplicador(pokemonSalvaje.tipo.split(",")[0], jugador.tipo);
             const dañoSalvaje = Math.max(5, (pokemonSalvaje.ataque - jugador.defensa / 2) * multSalvaje * defensaExtra);
@@ -137,24 +160,11 @@ exports.realizarAccion = async (req, res) => {
             log.push(`${pokemonSalvaje.nombre} contraataca e inflige ${dañoSalvaje.toFixed(1)} de daño.`);
         }
 
-        // Revisión de resultados
+        // Revisión de resultados después del ataque enemigo
         let resultado = null;
 
         if (jugador.hp <= 0 && pokemonSalvaje.hp <= 0) {
             resultado = "Empate: ambos Pokémon quedaron fuera de combate.";
-            delete activeBattles[user.id];
-        } else if (pokemonSalvaje.hp <= 0) {
-            resultado = "¡Ganaste! Has capturado al Pokémon salvaje.";
-            await db.pokemon.create({
-                nombre: pokemonSalvaje.nombre,
-                tipo: pokemonSalvaje.tipo,
-                hp: pokemonSalvaje.hp / 5,
-                ataque: pokemonSalvaje.ataque,
-                defensa: pokemonSalvaje.defensa,
-                velocidad: pokemonSalvaje.velocidad,
-                imagen: pokemonSalvaje.imagen,
-                usuario_id: user.id,
-            });
             delete activeBattles[user.id];
         } else if (jugador.hp <= 0) {
             resultado = "Perdiste. El Pokémon salvaje escapó.";
