@@ -166,6 +166,32 @@ exports.realizarAccion = async (req, res) => {
         if (jugador.hp <= 0 && pokemonSalvaje.hp <= 0) {
             resultado = "Empate: ambos Pokémon quedaron fuera de combate.";
             delete activeBattles[user.id];
+<<<<<<< Updated upstream
+=======
+        } else if (pokemonSalvaje.hp <= 0) {
+            // ✅ VALIDACIÓN DE LÍMITE DE 10 POKÉMON
+            const cantidadPokemon = await db.pokemon.count({
+                where: { usuario_id: user.id }
+            });
+            
+            if (cantidadPokemon >= 10) {
+                resultado = "¡Ganaste! Pero ya tienes 10 Pokémon, no puedes capturar más.";
+                delete activeBattles[user.id];
+            } else {
+                resultado = "¡Ganaste! Has capturado al Pokémon salvaje.";
+                await db.pokemon.create({
+                    nombre: pokemonSalvaje.nombre,
+                    tipo: pokemonSalvaje.tipo,
+                    hp: pokemonSalvaje.hp / 5,
+                    ataque: pokemonSalvaje.ataque,
+                    defensa: pokemonSalvaje.defensa,
+                    velocidad: pokemonSalvaje.velocidad,
+                    imagen: pokemonSalvaje.imagen,
+                    usuario_id: user.id,
+                });
+                delete activeBattles[user.id];
+            }
+>>>>>>> Stashed changes
         } else if (jugador.hp <= 0) {
             resultado = "Perdiste. El Pokémon salvaje escapó.";
             delete activeBattles[user.id];
